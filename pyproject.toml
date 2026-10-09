@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spendguard"
+version = "0.1.0"
+description = "Spend containment for running agents: per-agent ledger, loop circuit breaker, budget caps, expiring credentials."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [{ name = "Ashish Bhatt" }]
+keywords = ["llm", "agents", "cost", "budget", "proxy", "circuit-breaker", "spend"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: Proxy Servers",
+  "Topic :: System :: Monitoring",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# pyyaml is only used by a test that cross-checks the built-in YAML parser.
+dev = ["pytest>=8.0", "pyyaml>=6.0"]
+
+[project.scripts]
+spendguard = "spendguard.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spendguard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
