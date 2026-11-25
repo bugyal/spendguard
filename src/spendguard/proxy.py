@@ -397,7 +397,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         failure = ""
         meter: Optional[StreamMeter] = None
         response_chars = 0
+        data = b""
         if (resp.getheader("content-type") or "").lower().startswith("text/event-stream"):
+            # Streaming: bytes are relayed to the client incrementally, so
+            # meter-before-response is impossible — record at stream end.
             meter = StreamMeter(upstream.format)
             failure = self._relay_stream(resp, meter)
             usage, response_model = meter.close(), meter.model
@@ -410,13 +413,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if failure:
                 self.close_connection = True
                 self._send_json(502, _error_payload(upstream.format, "spendguard_upstream_broken", "spendguard: upstream response was cut off"))
-            else:
-                self._start_response(resp, len(data))
-                try:
-                    self.wfile.write(data)
-                except OSError:
-                    self.close_connection = True
-                    failure = "client_disconnected"
             usage, response_model = parse_response(upstream.format, _decode_json(data, resp.getheader("content-encoding")))
             response_chars = len(data)
 
@@ -441,6 +437,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         used_model = response_model or model
         latency = int((time.monotonic() - started) * 1000)
+        # For buffered calls, record BEFORE the response reaches the client:
+        # the ledger write must not race the caller's next read (a client can
+        # return and query the ledger the instant bytes arrive), and a crash
+        # between upstream response and client response must not lose the
+        # metering entry. Streaming calls were already relayed incrementally
+        # (meter-before-response is impossible there); they record at stream
+        # end, which is the earliest point the full usage exists.
         cost = guard.record_call(
             attr,
             model=used_model,
@@ -466,6 +469,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             f" in={usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens} out={usage.output_tokens}"
             f" ${cost:.4f} {latency}ms{flags}"
         )
+        if failure or meter is not None:
+            # upstream failure already answered with a 502; streams already
+            # relayed chunk-by-chunk
+            return
+        self._start_response(resp, len(data))
+        try:
+            self.wfile.write(data)
+        except OSError:
+            self.close_connection = True
 
     def _relay_stream(self, resp: http.client.HTTPResponse, meter: StreamMeter) -> str:
         """Relay an SSE body chunk by chunk. Returns "" or a failure class."""
